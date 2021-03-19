@@ -144,6 +144,16 @@ void gui_rec()
 	}
 }
 
+
+void gui_songpos(int v)
+{
+	char buf[32];
+	snprintf(buf, sizeof(buf), "SongPos: %4.1d", v);
+	gui_text(220+220, 32, buf, screen,9,255,199);
+}
+
+
+
 void gui_tempo(int v)
 {
 	char buf[32];
@@ -198,19 +208,12 @@ void gui_songedit(int pos, int ppos, int track, int editing)
 
 		for(n = 0; n < 32; ++n)
 		{
-			//int note = sseq_get_note(pos + n, t);
-			
-			//int note =35;
-			//char note = "----";
-			//int note = "-";
-			
-			if(tracks[t][pos+n]){
-				//printf("%c \n",tracks[t][pos+n]);
-			
-			note[0]=tracks[t][pos+n];
-			note[1]=tracks[t][pos+n];
-			note[2]=tracks[t][pos+n];
-			note[3]=tracks[t][pos+n];
+
+			if(tracks[t][pos+n]){			
+				note[0]=tracks[t][pos+n];
+				note[1]=tracks[t][pos+n];
+				note[2]=tracks[t][pos+n];
+				note[3]=tracks[t][pos+n];
 			}
 			else{
 				note[0]='-';
@@ -221,9 +224,12 @@ void gui_songedit(int pos, int ppos, int track, int editing)
 
 
 			if(t==0){
-			snprintf(np,5,"%.4d ",pos+n);
+			if(pos+n-16>-1){
+			snprintf(np,5,"%.4d ",pos+n-16);
 			gui_text((0 + FONT_CW * (1 + t*5))-FONT_CW,y0 + FONT_CH * (1 + n) + 3,np, screen,0,97,77);
 			}
+			}
+			if(pos+n-16>-1){
 			//n % m == n & (m - 1) 
 			//bitwise and to replace modulo
 			if((pos+n)&(16-1)){
@@ -232,18 +238,12 @@ void gui_songedit(int pos, int ppos, int track, int editing)
 			else{
 			gui_text(FONT_CW*3 + FONT_CW * (1 + t*5),y0 + FONT_CH * (1 + n) + 3,note, screen,9,055,199);	
 			}
-			//gui_text((FONT_CW*3 + FONT_CW * (1 + t*5))+FONT_CW*1,y0 + FONT_CH * (1 + n) + 3,"-", screen,9,255,199);
-			//gui_text((FONT_CW*3 + FONT_CW * (1 + t*5))+FONT_CW*2,y0 + FONT_CH * (1 + n) + 3,"-", screen,9,255,199);
-			//gui_text((FONT_CW*3 + FONT_CW * (1 + t*5))+FONT_CW*3,y0 + FONT_CH * (1 + n) + 3,"-", screen,9,255,199);
+			}
 		}
 	}
 	/* Cursors */
 	gui_text((FONT_CW*5 * ( 1+(ppos )))-10, y0, "****", screen,9,255,199);
 	gui_text((FONT_CW*5 * ( 1+(ppos )))-17,y0 + FONT_CH * (SSEQ_TRACKS + 1) ,"(   )", screen,9,255,199);
-	//if(editing)
-	//	gui_text(12 + FONT_CW * (6 + (ppos & 0x1f)),
-	//			y0 + FONT_CH * (1 + track) + 3,
-	//			"\007", screen);
 }
 
 
@@ -254,18 +254,11 @@ static void draw_main(void)
 
 	/* Clear */
 	SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 20, 20));
-	//gui_dirty(NULL);
-
-	//logo(fwc);
-
-	/* Oscilloscope frames */
-	//gui_bar(240 - 2, 8 - 2, 192 + 4, 128 + 4, fwc, screen);
-	//gui_bar(440 - 2, 8 - 2, 192 + 4, 128 + 4, fwc, screen);
 
 	/* Song info panel */
 	//gui_bar(6, 46, 228, 44, fwc, screen);
 	gui_tempo(tempo);
-	//gui_songpos(0);
+	gui_songpos(pos);
 	gui_rec();
 	/* Status box */
 	//gui_bar(6, 94, 228, 44, fwc, screen);
@@ -330,8 +323,19 @@ static void handle_key_ctrl(SDL_Event *ev)
 	  	if(emode){
   			tracks[track][pos+16]='1';
   			//printf("%c \n",tracks[track][pos+16]);
+  			if(!playing){
   			pos+=1;
+  			}
 	  	}
+		break;
+		case SDLK_d:
+		if(emode){
+			tracks[track][pos+16]='-';
+			//printf("%c \n",tracks[track][pos+16]);
+				if(!playing){
+					pos+=1;
+				}
+			}
 		break;
 	  case SDLK_0:
 	  	tempo++;
@@ -426,6 +430,9 @@ int main(int argc, char *argv[])
 	last_tick = SDL_GetTicks();
 	while(!die)
 	{
+		if(pos<0){
+			pos=0;
+		}
 		SDL_Event ev;
 		int tick = SDL_GetTicks();
 		int dt = tick - last_tick;
@@ -458,7 +465,7 @@ int main(int argc, char *argv[])
 		SDL_UpdateRect(screen, 0, 0, 0, 0);
 		draw_main();	
 		//sdl wait
-		SDL_Delay(10);
+		SDL_Delay(15);
 	}
 
 	SDL_FreeSurface(font);
