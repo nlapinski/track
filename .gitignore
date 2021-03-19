@@ -28,4 +28,6 @@ _deps
 *.dylib
 *.dll
 
+tracker
 
+.dSym
