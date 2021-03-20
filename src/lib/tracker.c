@@ -1,7 +1,9 @@
 #include "SDL.h"
 #include "../include/tracker.h"
 #include "SDL_image.h"
-
+#include <signal.h>
+#include <pthread.h>
+#include <time.h>
 
 
 #define FONT_CW 12
@@ -9,10 +11,10 @@
 #define SSEQ_TRACKS 16
 
 //lots of globals @_@
-static int sdlflags = SDL_HWSURFACE| SDL_FULLSCREEN ;	/* SDL display init flags */
+static int sdlflags = SDL_HWSURFACE;//| SDL_FULLSCREEN ;	/* SDL display init flags */
 
 
-int die =0;	
+int die =0;
 int last_tick; //last sdl tick
 int playing=0;
 static int tempo =120;
@@ -26,6 +28,7 @@ static SDL_Surface *screen = NULL;
 static char tracks[SSEQ_TRACKS][1000];
 
 
+#define snprintf_nowarn(...) (snprintf(__VA_ARGS__) < 0 ? abort() : (void)0)
 
 
 
@@ -67,11 +70,9 @@ int gui_open(SDL_Surface *scrn)
 
 void gui_text(int x, int y, const char *txt, SDL_Surface *dst,int r, int g ,int b)
 {
-    SDL_Surface *tmp = SDL_DisplayFormat(font);
-
-
-    SDL_SetColorKey(font,SDL_SRCCOLORKEY,SDL_MapRGB(font->format,255,255,255));
-    SDL_FillRect(tmp,&tmp->clip_rect,SDL_MapRGB(tmp->format,r,g,b));
+  SDL_Surface *tmp = SDL_DisplayFormat(font);
+  SDL_SetColorKey(font,SDL_SRCCOLORKEY,SDL_MapRGB(font->format,255,255,255));
+  SDL_FillRect(tmp,&tmp->clip_rect,SDL_MapRGB(tmp->format,r,g,b));
 	SDL_BlitSurface(font,NULL,tmp,NULL);
 	SDL_SetColorKey(tmp,SDL_SRCCOLORKEY,SDL_MapRGB(tmp->format,255,0,255));
 
@@ -88,7 +89,7 @@ void gui_text(int x, int y, const char *txt, SDL_Surface *dst,int r, int g ,int 
 	{
 		int c = *txt++;
 		char a = remap[c-32];
-		
+
 		///ughhh
 		//printf("%d=%d a=c\n",a,c-32);
 		//c=convert;
@@ -109,7 +110,7 @@ void gui_text(int x, int y, const char *txt, SDL_Surface *dst,int r, int g ,int 
 			x %= 8 * FONT_CW;
 			x += sx;
 			break;
-		 
+
 		  default:	/* printables */
 		  {
 			SDL_Rect dr;
@@ -125,11 +126,12 @@ void gui_text(int x, int y, const char *txt, SDL_Surface *dst,int r, int g ,int 
 			//gui_dirty(&dr);
 			x += FONT_CW;
 			break;
+
 		  }
 		}
 	}
+	SDL_FreeSurface(tmp);
 
-	
 }
 
 
@@ -186,7 +188,7 @@ void gui_rec()
 		gui_text(220, 32, "**REC**", screen,255,0,199);
 	}
 	else{
-		gui_text(220, 32, "**REC**", screen,9,255,199);	
+		gui_text(220, 32, "**REC**", screen,9,255,199);
 	}
 }
 
@@ -209,53 +211,27 @@ void gui_tempo(int v)
 void gui_songedit(int pos, int ppos, int track, int editing)
 {
 	int t, n;
-	char buf[128];
+	//char buf[128];
 	char np[5];
 	char note[4];
-	SDL_Rect r;
+
 	const int y0 = 64;
 
-	/* Clear */
-	r.x = 12 - 2;
-	r.y = y0 - 2;
-	r.w = FONT_CW * 38 + 4;
-	r.h = FONT_CH * (SSEQ_TRACKS + 2) + 4 + 5;
-
-	/* Upper time bar */
-	//snprintf(buf, sizeof(buf), "\027...\022...\022...\022..."
-	//		"\027...\022...\022...\022...");
-	gui_text(12 + 6 * FONT_CW, y0, buf, screen,9,255,199);
-
 	/* Track names + cursor */
-	gui_text((FONT_CW*4), y0 - FONT_CH,"T-0  T-1  T-2  T-3  T-4  T-5  T-6  T-7  T-8  T-9  T-A  T-B  T-C  T-D  T-E  T-F",
-			screen,200,255,199);
-	
-	//???????????????
-	//gui_text(12, y0 + FONT_CH * (1 + track) + 3,
-	//		"\003\001\005", screen,9,255,199);
-
-	/* Lower time bar */
-	//snprintf(buf, sizeof(buf), "\007%.4d\022...\007%.4d\022..."
-	//		"\007%.4d\022...\007%.4d\022...",
-	//		pos, pos + 8, pos + 16, pos + 24);
-	//gui_text(12 + 6 * FONT_CW,
-	//		y0 + FONT_CH * (SSEQ_TRACKS + 1) + 6+190, buf, screen,9,255,199);
-
-
+	gui_text((FONT_CW*4), y0 - FONT_CH,"T-0  T-1  T-2  T-3  T-4  T-5  T-6  T-7  T-8  T-9  T-A  T-B  T-C  T-D  T-E  T-F", screen,200,255,199);
 
 	/* Notes */
-	buf[1] = 0;
 
 	for(t = 0; t < SSEQ_TRACKS; ++t){
 
-		if(playing && tracks[t][pos]){
-			printf("note on ->%c  track ->%d\n",tracks[t][pos],t);
-		};
+		//if(playing && tracks[t][pos]){
+			//printf("note on ->%c  track ->%d\n",tracks[t][pos],t);
+		//};
 
 		for(n = 0; n < 32; ++n)
 		{
 
-			if(tracks[t][pos+n]){			
+			if(tracks[t][pos+n]){
 				note[0]=tracks[t][pos+n];
 				note[1]=tracks[t][pos+n];
 				note[2]=tracks[t][pos+n];
@@ -269,21 +245,25 @@ void gui_songedit(int pos, int ppos, int track, int editing)
 			}
 
 
-			if(t==0){
 			if(pos+n-16>-1){
-			snprintf(np,5,"%.4d ",pos+n-16);
-			gui_text((0 + FONT_CW * (1 + t*5))-FONT_CW,y0 + FONT_CH * (1 + n) + 3,np, screen,0,97,77);
-			}
-			}
-			if(pos+n-16>-1){
-			//n % m == n & (m - 1) 
+			//n % m == n & (m - 1)
 			//bitwise and to replace modulo
-			if((pos+n)&(16-1)){
-			gui_text(FONT_CW*3 + FONT_CW * (1 + t*5),y0 + FONT_CH * (1 + n) + 3,note, screen,9,255,199);
-			}
-			else{
-			gui_text(FONT_CW*3 + FONT_CW * (1 + t*5),y0 + FONT_CH * (1 + n) + 3,note, screen,9,055,199);	
-			}
+				if((pos+n)&(16-1)){
+				gui_text(FONT_CW*3 + FONT_CW * (1 + t*5),y0 + FONT_CH * (1 + n) + 3,note, screen,9,255,199);
+				}
+				else{
+				gui_text(FONT_CW*3 + FONT_CW * (1 + t*5),y0 + FONT_CH * (1 + n) + 3,note, screen,9,055,199);
+				}
+				if(t==0){
+				//snprintf(np,5,"%04d",n);
+				snprintf_nowarn(np, sizeof(np), "%.04d", pos+n-16);
+				//sprintf(np, "%04d", n+pos-16);
+				gui_text((0 + FONT_CW * (1 + t*5))-FONT_CW,y0 + FONT_CH * (1 + n) + 3,np, screen,0,97,77);
+				//clear
+
+				}
+				memset(note, 0, sizeof note);
+				memset(np, 0, sizeof np);
 			}
 		}
 	}
@@ -407,19 +387,27 @@ static void breakhandler(int a)
 	die = 1;
 }
 
-void *clock(void *arg)
+void sleep_us(unsigned long microseconds)
+{
+    struct timespec ts;
+    ts.tv_sec = microseconds /1000000;             // whole seconds
+    ts.tv_nsec = (microseconds % 1000000) * 1000;    // remainder, in nanoseconds
+    nanosleep(&ts, NULL);
+}
+
+void *step_clock(void *arg)
 {
     while(1)
-    {	
-    	//make this clock monotonic to try and fix any jitter///also output mraa clock pulse here 
+    {
+    	//make this clock monotonic to try and fix any jitter///also output mraa clock pulse here
     	if(playing){
     		pos+=1;
     		//60,000 / 100 bpm = 600ms /8 for 32nd notes
     		//long time = ;
     		//printf("%d\n", time);
-        
+
     	}
-        	usleep(((60000 / tempo)/8)*1000);
+        	sleep_us((unsigned long)((60000 / tempo)/8)*1000);
 
     }
     return 0;
@@ -431,9 +419,9 @@ int main(int argc, char *argv[])
 
 	//spawn clock threads
 	pthread_t tid;
-	pthread_create(&tid, NULL, &clock, NULL);
+	pthread_create(&tid, NULL, &step_clock, NULL);
 
-	
+
 	///init SDL
 	if(SDL_Init(0) < 0)
 		return -1;
@@ -443,7 +431,7 @@ int main(int argc, char *argv[])
 	signal(SIGINT, breakhandler);
 
 	//2880x1800 ???
-	screen = SDL_SetVideoMode(1024, 600	, 16, sdlflags);
+	screen = SDL_SetVideoMode(1024, 600	, 8, sdlflags);
 	if(!screen)
 	{
 		fprintf(stderr, "Couldn't open display!\n");
@@ -453,14 +441,14 @@ int main(int argc, char *argv[])
 	SDL_WM_SetCaption("tracker", "tracker");
 	//end sdl stuff
 
-	//start up gui 
+	//start up gui
 	if(gui_open(screen) < 0)
 	{
 		fprintf(stderr, "Couldn't start GUI!\n");
 		SDL_Quit();
 		return -1;
 	}
-		
+
 	//test fonts
 	//gui_text( 20, 10, "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", screen,233,10,0);
 	//gui_text( 20, 20, "!@#$%^&*()-=_+", screen,23,255,0);
@@ -468,11 +456,6 @@ int main(int argc, char *argv[])
 	//gui_text( 20, 40, "}}}}{{{", screen,9,55,199);
 	//gui_text( 20, 50, "[]", screen,255,25,199);
 	//gui_text( 20, 60, "abcdefghijklmnopqrstuvwxyz", screen,9,255,199);
-
-
-
-	//gui_text( 0, 2, "123456789qwertyuiopasdfghjklzxcv", screen);
-	//gui_text( 0, 122, "123456789qwertyuiopasdfghjklzxcv", screen);
 	last_tick = SDL_GetTicks();
 	while(!die)
 	{
@@ -485,7 +468,7 @@ int main(int argc, char *argv[])
 		last_tick = tick;
 
 		//gui_text( 390, tick/100, "abcdefghijklmnopqrstuvwxyz", screen,(23+34+255+tick)%255,(255-255-1212-tick)%255,tick%255);
-		//printf("%d\n",playing);	
+		//printf("%d\n",playing);
 
 		/* Handle GUI events */
 
@@ -505,9 +488,9 @@ int main(int argc, char *argv[])
 
 
 		SDL_UpdateRect(screen, 0, 0, 0, 0);
-		draw_main();	
+		draw_main();
 		//sdl wait
-		SDL_Delay(5);
+		SDL_Delay(15);
 	}
 
 	SDL_FreeSurface(font);
@@ -515,4 +498,3 @@ int main(int argc, char *argv[])
 	SDL_Quit();
 	return 0;
 }
-
