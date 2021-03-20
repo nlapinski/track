@@ -1,5 +1,5 @@
 CC =		gcc
-CLIBS =		$(shell sdl-config --libs) -lSDL_image -lpthread -lm #-lefence
+CLIBS =		$(shell sdl-config --libs) -lSDL_image -lpthread -lmraa -lm #-lefence
 CFLAGS =	-O3 -W $(shell sdl-config --cflags) -g -W
 
 HEADERS =	src/include/tracker.h 

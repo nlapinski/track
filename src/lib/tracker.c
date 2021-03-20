@@ -5,13 +5,15 @@
 #include <pthread.h>
 #include <time.h>
 
+/* mraa header */
+#include "mraa/spi.h"
 
 #define FONT_CW 12
 #define FONT_CH 12
 #define SSEQ_TRACKS 16
 
 //lots of globals @_@
-static int sdlflags = SDL_HWSURFACE;//| SDL_FULLSCREEN ;	/* SDL display init flags */
+static int sdlflags = SDL_SWSURFACE |SDL_NOFRAME;//SDL_HWPALETTE	| SDL_HWSURFACE | SDL_FULLSCREEN | SDL_DOUBLEBUF;// | SDL_ASYNCBLIT	;	/* SDL display init flags */
 
 
 int die =0;
@@ -25,7 +27,7 @@ static int emode =0;
 static SDL_Surface *font = NULL;
 static SDL_Surface *screen = NULL;
 
-static char tracks[SSEQ_TRACKS][1000];
+static char tracks[SSEQ_TRACKS][2000];
 
 
 #define snprintf_nowarn(...) (snprintf(__VA_ARGS__) < 0 ? abort() : (void)0)
@@ -430,14 +432,16 @@ int main(int argc, char *argv[])
 	signal(SIGTERM, breakhandler);
 	signal(SIGINT, breakhandler);
 
+	//SDL_SetRefreshRate(75);
 	//2880x1800 ???
-	screen = SDL_SetVideoMode(1024, 600	, 8, sdlflags);
+	screen = SDL_SetVideoMode(1024,600,8, sdlflags);
 	if(!screen)
 	{
 		fprintf(stderr, "Couldn't open display!\n");
 		SDL_Quit();
 		return -1;
 	}
+	SDL_ShowCursor(0);
 	SDL_WM_SetCaption("tracker", "tracker");
 	//end sdl stuff
 
@@ -459,6 +463,11 @@ int main(int argc, char *argv[])
 	last_tick = SDL_GetTicks();
 	while(!die)
 	{
+		if(pos>1998){
+			pos=0;
+		}
+
+
 		if(pos<0){
 			pos=0;
 		}
@@ -487,8 +496,9 @@ int main(int argc, char *argv[])
 		}
 
 
-		SDL_UpdateRect(screen, 0, 0, 0, 0);
+		//SDL_UpdateRect(screen, 0, 0, 0, 0);
 		draw_main();
+		SDL_Flip(screen);
 		//sdl wait
 		SDL_Delay(15);
 	}
