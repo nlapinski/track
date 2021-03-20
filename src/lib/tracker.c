@@ -133,6 +133,52 @@ void gui_text(int x, int y, const char *txt, SDL_Surface *dst,int r, int g ,int 
 }
 
 
+void gui_box(int x, int y, int w, int h, Uint32 c, SDL_Surface *dst)
+{
+	SDL_Rect r;
+	r.x = x;
+	r.y = y;
+	r.w = w;
+	r.h = 1;
+	SDL_FillRect(dst, &r, c);
+
+	r.x = x;
+	r.y = y + h - 1;
+	r.w = w;
+	r.h = 1;
+	SDL_FillRect(dst, &r, c);
+
+	r.x = x;
+	r.y = y + 1;
+	r.w = 1;
+	r.h = h - 2;
+	SDL_FillRect(dst, &r, c);
+
+	r.x = x + w - 1;
+	r.y = y + 1;
+	r.w = 1;
+	r.h = h - 2;
+	SDL_FillRect(dst, &r, c);
+
+	r.x = x;
+	r.y = y;
+	r.w = w;
+	r.h = h;
+//	gui_dirty(&r);
+}
+
+
+void gui_bar(int x, int y, int w, int h, Uint32 c, SDL_Surface *dst)
+{
+	SDL_Rect r;
+	r.x = x;
+	r.y = y;
+	r.w = w;
+	r.h = h;
+	SDL_FillRect(dst, &r, SDL_MapRGB(dst->format, 0, 90, 0));
+	gui_box(x, y, w, h, c, dst);
+}
+
 void gui_rec()
 {
 
@@ -149,7 +195,7 @@ void gui_songpos(int v)
 {
 	char buf[32];
 	snprintf(buf, sizeof(buf), "SongPos: %4.1d", v);
-	gui_text(220+220, 32, buf, screen,9,255,199);
+	gui_text(220+220, 32, buf, screen,176, 82, 121);
 }
 
 
@@ -248,9 +294,10 @@ void gui_songedit(int pos, int ppos, int track, int editing)
 
 
 
+
 static void draw_main(void)
 {
-	Uint32 fwc = SDL_MapRGB(screen->format, 0, 128, 0);
+	Uint32 fwc = SDL_MapRGB(screen->format, 0, 0, 128);
 
 	/* Clear */
 	SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 20, 20));
@@ -388,8 +435,6 @@ int main(int argc, char *argv[])
 
 	
 	///init SDL
-	//SDL_Surface *screen;
-
 	if(SDL_Init(0) < 0)
 		return -1;
 
@@ -397,8 +442,8 @@ int main(int argc, char *argv[])
 	signal(SIGTERM, breakhandler);
 	signal(SIGINT, breakhandler);
 
-	//2880x1800
-	screen = SDL_SetVideoMode(1024, 600	, 8, sdlflags);
+	//2880x1800 ???
+	screen = SDL_SetVideoMode(1024, 600	, 16, sdlflags);
 	if(!screen)
 	{
 		fprintf(stderr, "Couldn't open display!\n");
@@ -408,6 +453,7 @@ int main(int argc, char *argv[])
 	SDL_WM_SetCaption("tracker", "tracker");
 	//end sdl stuff
 
+	//start up gui 
 	if(gui_open(screen) < 0)
 	{
 		fprintf(stderr, "Couldn't start GUI!\n");
@@ -439,11 +485,7 @@ int main(int argc, char *argv[])
 		last_tick = tick;
 
 		//gui_text( 390, tick/100, "abcdefghijklmnopqrstuvwxyz", screen,(23+34+255+tick)%255,(255-255-1212-tick)%255,tick%255);
-		//printf("%d\n",playing);
-
-		//handle playbkac triggers
-		//
-
+		//printf("%d\n",playing);	
 
 		/* Handle GUI events */
 
@@ -465,7 +507,7 @@ int main(int argc, char *argv[])
 		SDL_UpdateRect(screen, 0, 0, 0, 0);
 		draw_main();	
 		//sdl wait
-		SDL_Delay(15);
+		SDL_Delay(5);
 	}
 
 	SDL_FreeSurface(font);
