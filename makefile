@@ -1,8 +1,8 @@
 CC =		gcc
-CLIBS =		$(shell sdl-config --libs) -lSDL_image -lpthread -lmraa -lm #-lefence
-CFLAGS =	-O3 -W $(shell sdl-config --cflags) -g -W
+CLIBS =		$(shell sdl2-config --libs) -lSDL2_image -lpthread -lmraa -lOpenGL -lm #-lefence
+CFLAGS =	-O3 -W $(shell sdl2-config --cflags) -g -W
 
-HEADERS =	src/include/tracker.h 
+HEADERS =	src/include/tracker.h
 SOURCES =	src/lib/tracker.c
 
 all:		tracker
