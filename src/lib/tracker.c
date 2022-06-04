@@ -7,7 +7,8 @@
 #include <signal.h>
 #include <pthread.h>
 #include <time.h>
-
+//#include "midi_notes_1.h"
+//#include "midi_notes_2.h"
 /* mraa header */
 #include "mraa/spi.h"
 
@@ -23,7 +24,11 @@ FILE * f;
 #define SPI_BUS 0
 
 /* SPI frequency in Hz */
+//15mhz
 #define SPI_FREQ 15000000
+
+//trying a slower speed 5mhz
+//#define SPI_FREQ 5000000
 
 //global spi context
 mraa_spi_context spi;
@@ -35,7 +40,7 @@ mraa_spi_context spi;
 int die =0;
 int last_tick; //last sdl tick
 int playing=0;
-static int tempo =120;
+static int tempo =85;
 static int pos=0;
 static int track = 0;
 static int emode =0;
@@ -57,9 +62,9 @@ SDL_PixelFormat* mappingFormat;// = SDL_AllocFormat( format );
 static int cp_buffer[128];
 static int cp_len=8;
 static int tracks[SSEQ_TRACKS][3000];
-
+static int arp_len=4;
 int clear[16];
-
+static int oct = 1;
 int jump =0;
 
 #define snprintf_nowarn(...) (snprintf(__VA_ARGS__) < 0 ? abort() : (void)0)
@@ -95,10 +100,90 @@ static void write_pin(mraa_spi_context spi,int pin,int val){
 
 }
 
+
+
+int scales[15][12]={
+  {
+    1,0,1,0,1,1,0,1,0,1,0,1                        }
+  , // a minor scale  A, B, C, D, E, F, and G.
+
+  {
+    1,0,1,1,0,1,0,1,1,0,1,0                        }
+  , //C natural minor
+
+  {
+    1,1,1,1,1,1,1,1,1,1,1,1                        }
+  , //chroma
+
+  {
+    1,0,1,0,1,1,0,1,0,1,0,1                        }
+  , //maj dia F—C—G—D—A—E—B?
+  {
+    1,0,1,0,1,0,0,1,0,1,0,0                        }
+  , //maj penta C, D, E, G, A.?
+
+  {
+    1,0,1,1,1,0,0,1,0,1,0,0                        }
+  , //maj blues C, D, D♯/E♭, E, G, A
+  //{1,0,1,0,1,0,1,0,1,0,1,0}, //whole tone
+  {
+    1,0,0,0,1,0,0,1,0,0,0,0                        }
+  , //maj chord
+  {
+    1,0,0,0,0,0,0,1,0,0,0,0                        }
+  , //maj fifth
+  {
+    1,0,0,0,1,0,0,1,0,0,1,0                        }
+  , //maj +7
+
+  {
+    1,0,1,1,0,1,0,1,1,0,1,0                        }
+  , //min dia
+  {
+    1,0,0,1,0,1,0,1,0,0,1,0                        }
+  , //min penta
+  {
+    1,0,0,1,0,1,1,1,0,0,1,0                        }
+  , //min blues
+  {
+    1,0,0,1,0,0,0,1,0,0,0,0                        }
+  , //min chord
+  {
+    1,0,1,0,1,0,1,0,1,0,1,0                        }
+  , //whole tone scale
+  {
+    1,0,0,1,0,0,0,1,0,0,1,0                        }
+  , //min +7
+};
+uint8_t quantizeNote(uint8_t _scale,uint8_t note){
+  if(scales[_scale][note%12]){
+    return note;
+  }
+  else{
+    uint8_t higher=0;
+    while(!scales[_scale][(note+higher)%12]){
+      higher++;
+    }
+    uint8_t lower=0;
+    while(!scales[_scale][(note-lower)%12]){
+      lower++;
+    }
+    if(higher<lower) return note+higher;
+    else return note-lower;
+  }
+  return note;
+}
+
+
+
+struct timespec deadline;
+
+
 void sleep_us(unsigned long microseconds)
 {
-		struct timespec deadline;
+		//struct timespec deadline;
 		clock_gettime(CLOCK_MONOTONIC, &deadline);
+		//clock_gettime(CLOCK_REALTIME, &(deadline));
 
 		// Add the time you want to sleep
 		deadline.tv_nsec += microseconds*1000;
@@ -109,6 +194,8 @@ void sleep_us(unsigned long microseconds)
 		    deadline.tv_sec++;
 		}
 		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, NULL);
+		//clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &(deadline), NULL);
+
 }
 
 /*
@@ -309,8 +396,8 @@ void gui_rec()
 
 void gui_songpos(int v)
 {
-	char buf[32];
-	snprintf(buf, sizeof(buf), "SongPos: %4.1d CopyPaste: %4.1d", v,cp_len);
+	char buf[70];
+	snprintf(buf, sizeof(buf), "SongPos: %4.1d CopyPaste: %4.1d   arp: %4.1d  oct:%4.1d", v,cp_len, arp_len,oct);
 	gui_text(220+220, 32, buf, 176, 82, 121);
 }
 
@@ -339,6 +426,74 @@ void paste(){
 	}
 	pos+=cp_len;	
 }
+
+
+float lerp(float a, float b, float f)
+{
+    return a + f * (b - a);
+}
+
+
+
+
+void blend(){
+
+	int current = tracks[track][pos+16];
+	int next =0;
+	int stop = 0;
+	printf("start blend\n");
+	while(next == 0){
+		next=tracks[track][pos+16+1+stop];
+
+		if(stop>64){
+			break;
+		}
+
+		stop++;
+
+	}
+
+	for(int i =1;i<stop;i++){
+
+	//	tracks[track][pos+16+i]=(current*((i)/stop))+(next*(stop-i/stop));
+		float t = 1-((float)i/(float)stop);
+		//a+t(b-a);//
+		//(A*(1024-F) + B * F) >> 10;
+		tracks[track][pos+16+i]=(int)lerp(next,current,t);
+		//tracks[track][pos+16+i]=current*(66-t) + (next * t);
+
+	}
+
+	pos+=stop;
+}
+
+//arp function
+//(65,535/20)10.124
+///33,177.09375-32,767.5
+//
+void arp(){
+	int current=tracks[track][pos+16];
+	for(int i=0;i<arp_len;i++){
+
+		tracks[track][pos+16+i]=current+(410*i);
+
+	}
+	pos+=arp_len;
+}
+
+void fade_out(int tt,int pp,int ll){
+        int current=tracks[tt][pp+16];
+        for(int i=0;i<ll;i++){
+
+                //tracks[tt][pp+16+i]=
+			
+		float result = (float)current* (1- (float)i/(float)ll);
+		tracks[tt][pp+16+i]=(int)result;
+
+        }
+}
+
+
 
 int activity[16];
 
@@ -501,24 +656,27 @@ static void draw_main(void)
 
 void init_dac(){
 
+playing=0;
+pos=0;
+                sleep_us(10000);
 
 	//disable mux
-	mraa_spi_write(spi,0xB0);
-	mraa_spi_write_word(spi,0x0000);
+//	mraa_spi_write(spi,0xB0);
+//	mraa_spi_write_word(spi,0x0000);
 
 	//power down all
-	mraa_spi_write(spi,0x50);
+//	mraa_spi_write(spi,0x50);
 
 	//power up All
-	mraa_spi_write(spi,0x20);
+//	mraa_spi_write(spi,0x20);
 
 	//config voltage ref
 	//mraa_spi_write(spi,0x70);
 
 
 	//config span
-	mraa_spi_write(spi,0xE0);
-	mraa_spi_write_word(spi,0x0003);
+//	mraa_spi_write(spi,0xE0);
+//	mraa_spi_write_word(spi,0x0003);
 
 	//zero out dacs
 	for(int i=0;i<16;i++){
@@ -526,21 +684,22 @@ void init_dac(){
 	mraa_spi_write(spi,0x30+i);
 	mraa_spi_write(spi,0x00);
 	mraa_spi_write(spi,0x00);
+	                sleep_us(10000);
 	}
 	//set hi
-	for(int i=0;i<16;i++){
-	mraa_spi_write(spi,0x00);
-	mraa_spi_write(spi,0x30+i);
-	mraa_spi_write(spi,0xFF);
-	mraa_spi_write(spi,0xFF);
-	}
+//	for(int i=0;i<16;i++){
+//	mraa_spi_write(spi,0x00);
+//	mraa_spi_write(spi,0x30+i);
+//	mraa_spi_write(spi,0xFF);
+//	mraa_spi_write(spi,0xFF);
+//	}
 	//zero out dacs
-	for(int i=0;i<16;i++){
-	mraa_spi_write(spi,0x00);
-	mraa_spi_write(spi,0x30+i);
-	mraa_spi_write(spi,0x00);
-	mraa_spi_write(spi,0x00);
-	}
+//	for(int i=0;i<16;i++){
+//	mraa_spi_write(spi,0x00);
+//	mraa_spi_write(spi,0x30+i);
+//	mraa_spi_write(spi,0x00);
+//	mraa_spi_write(spi,0x00);
+//	}
 
 
 }
@@ -551,7 +710,7 @@ void init_dac(){
 static void handle_key_ctrl(SDL_Event *ev)
 {
 
-
+	int note_const = 205;
 
 	switch(ev->key.keysym.sym)
 	{
@@ -614,10 +773,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 	  	pos=0;
 	  	playing=1;
 		break;
-	  case SDLK_x:
-		break;
 
-		break;
 	  case SDLK_s:
 		break;
 	  case SDLK_1:
@@ -630,7 +786,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 		break;
 		case SDLK_2:
 			if(emode){
-				tracks[track][pos+16]+=0x0FFF;
+				tracks[track][pos+16]+=410;
 				if(tracks[track][pos+16]>0xFFFE){
 					tracks[track][pos+16]=0xFFFF;
 				}
@@ -638,7 +794,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 		case SDLK_3:
 	  	if(emode){
-  			tracks[track][pos+16]+=0x00FF;
+  			tracks[track][pos+16]+=205;
 				if(tracks[track][pos+16]>0xFFFE){
 					tracks[track][pos+16]=0xFFFF;
 				}
@@ -646,7 +802,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 		case SDLK_4:
 			if(emode){
-				tracks[track][pos+16]-=0x0FFF;
+				tracks[track][pos+16]-=410;
 				if(tracks[track][pos+16]<0x0001){
 					tracks[track][pos+16]=0x0000;
 				}
@@ -654,7 +810,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 		case SDLK_5:
 			if(emode){
-				tracks[track][pos+16]-=0x00FF;
+				tracks[track][pos+16]-=205;
 				if(tracks[track][pos+16]<0x0001){
 					tracks[track][pos+16]=0x0000;
 				}
@@ -662,7 +818,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_6:
 			if(emode){
-				tracks[track][pos+16]+=0x0001;
+				tracks[track][pos+16]+=102;
 				if(tracks[track][pos+16]>0xFFFE){
 					tracks[track][pos+16]=0xFFFF;
 				}
@@ -670,7 +826,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_7:
 				if(emode){
-					tracks[track][pos+16]-=0x0001;
+					tracks[track][pos+16]-=102;
 					if(tracks[track][pos+16]<0x0001){
 						tracks[track][pos+16]=0x0000;
 					}
@@ -679,7 +835,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_q:
 			if(emode){
-				tracks[track][pos+16]=0x5FFF;
+				tracks[track][pos+16]=32768+(note_const*oct*8);
 					if(!playing){
 						pos+=jump;
 					}
@@ -687,7 +843,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_w:
 			if(emode){
-				tracks[track][pos+16]=0x6FFF;
+				tracks[track][pos+16]=32768+(note_const)+(note_const*oct*8);
 					if(!playing){
 						pos+=jump;
 					}
@@ -695,7 +851,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_e:
 			if(emode){
-				tracks[track][pos+16]=0x7FFF;
+				tracks[track][pos+16]=32768+note_const+note_const+(note_const*oct*8);
 				//printf("%c \n",tracks[track][pos+16]);
 					if(!playing){
 						pos+=jump;
@@ -704,7 +860,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_r:
 				if(emode){
-					tracks[track][pos+16]=0x8FFF;
+					tracks[track][pos+16]=32768+note_const+note_const+note_const+(note_const*oct*8);
 						if(!playing){
 							pos+=jump;
 						}
@@ -712,7 +868,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_t:
 				if(emode){
-					tracks[track][pos+16]=0x9FFF;
+					tracks[track][pos+16]=32768+note_const+note_const+note_const+note_const+(note_const*oct*8);
 						if(!playing){
 							pos+=jump;
 						}
@@ -720,7 +876,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_y:
 			if(emode){
-			tracks[track][pos+16]=0xAFFF;
+			tracks[track][pos+16]=32768+note_const+note_const+note_const+note_const+note_const+(note_const*oct*8);
 				if(!playing){
 					pos+=jump;
 				}
@@ -728,7 +884,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_u:
 			if(emode){
-			tracks[track][pos+16]=0xBFFF;
+			tracks[track][pos+16]=32768+note_const+note_const+note_const+note_const+note_const+note_const+(note_const*oct*8);
 				if(!playing){
 					pos+=jump;
 				}
@@ -736,7 +892,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_i:
 			if(emode){
-			tracks[track][pos+16]=0xCFFF;
+			tracks[track][pos+16]=32768+(note_const*7)+(note_const*oct*8);
 				if(!playing){
 					pos+=jump;
 				}
@@ -744,7 +900,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_o:
 			if(emode){
-			tracks[track][pos+16]=0xDFFF;
+			tracks[track][pos+16]=32768+(note_const*8)+(note_const*oct*8);
 				if(!playing){
 					pos+=jump;
 				}
@@ -752,7 +908,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			break;
 			case SDLK_p:
 			if(emode){
-			tracks[track][pos+16]=0xEFFF;
+			tracks[track][pos+16]=32768+(note_const*9)+(note_const*oct*8);
 				if(!playing){
 					pos+=jump;
 				}
@@ -765,6 +921,35 @@ static void handle_key_ctrl(SDL_Event *ev)
 				if(!playing){
 					pos+=jump;
 				}
+			}
+			break;
+
+                case SDLK_z:
+                        if(oct<16){
+                        oct++;
+                        }
+                        break;
+                case SDLK_x:
+                        if(oct>0){
+                        oct--;
+                        }
+			break;
+
+
+
+		case SDLK_a:
+			if(emode){
+				arp();
+			}
+			break;
+		case SDLK_f:
+			if(arp_len<128){
+			arp_len++;
+			}
+			break;
+		case SDLK_g:
+			if(arp_len>0){
+			arp_len--;
 			}
 			break;
 		case SDLK_k:
@@ -789,7 +974,7 @@ static void handle_key_ctrl(SDL_Event *ev)
 			//free(f);
 			break;
 		case SDLK_b:
-			f = fopen("tracks.aaa", "rb"); // wb -write binary
+			f = fopen("tracks.aaa", "rb"); // read binary
 			if (f != NULL)
 			{
 				fread(tracks, sizeof(tracks), 1, f);
@@ -807,6 +992,9 @@ static void handle_key_ctrl(SDL_Event *ev)
 			if(tempo>1){
 	  	tempo--;
 		}
+		break;
+	  case SDLK_PERIOD:
+		blend();
 		break;
 	  case SDLK_ESCAPE:
 		die=1;
@@ -856,27 +1044,36 @@ void *step_clock(void *arg)
 
 
     	if(playing){
-
+				activity[0]=1-activity[0];
 				write_pin(spi,0,0xFFFF);
 				write_pin(spi,0,0x7FFF);
 
 
 				for(int i =1;i<16;i++){
 						//65535
-						activity[i]=tracks[i][pos+16];
-
-						if(tracks[i][pos+16]==0xFFFF){
+						activity[i]=tracks[i][pos+16-1];
+						//write_pin(spi,i,0x7FFF);
+						if(tracks[i][pos+16-1]==0xFFFF){
 							write_pin(spi,i,0xFFFF);
 							write_pin(spi,i,0x7FFF);
+							//write_pin(spi,i,0x7FFF);
 							//break;
 						}
-						else if(tracks[i][pos+16]){
-							write_pin(spi,i,tracks[i][pos+16]);
+						else if(tracks[i][pos+16-1]){
+							write_pin(spi,i,tracks[i][pos+16-1]);
 							//sleep_us((unsigned long)10000);
 							//printf("got value > %d for pin %d\n", tracks[i][pos+16],i);
 						}
 						//activity[i]/=4;
 				}
+
+			//	write_pin(spi,1,0x7FFF);
+			//	write_pin(spi,2,0x7FFF);
+			//	write_pin(spi,3,0x7FFF);
+			//	write_pin(spi,4,0x7FFF);
+
+
+
 
 				pos+=1;
 				//tempo clock
@@ -885,9 +1082,9 @@ void *step_clock(void *arg)
     		//long time = ;
     		//printf("%d\n", time);/
 
-    	}
+	}
 			sleep_us((unsigned long)((60000 / tempo)/8)*1000);
-
+	
 			//tempo clock
 
     }
@@ -916,10 +1113,363 @@ void *stop_pin(void *vargs)
     	return NULL;
 */
 
+float map(float x, float in_min, float in_max, float out_min, float out_max)
+{
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+
+int midi_to_dac(int note){
+	
+	int quant = (int)quantizeNote(0,(uint8_t)note);
+	
+	int out = 0;
+	float convert =(float)quant;
+	convert*=1.0/12.0;
+	convert+=(1.0/12.0)*7;
+	convert*=1000.0;
+	float max = 65024;
+	float half = max/2.0;
+	convert = map(convert,0,10666.666,half,max);
+	
+	out = (int)convert;
+	return out;
+}
+
+int melody(int offset, int length, float min, float max,int divisor,float line,int vca, int tt,int variance,int layer){
+
+for(int q =0;q<length;q++){
+
+
+        float rad = 3.141592 / 180;
+	float n =0.0;
+	for(int i =0;i<layer;i++){
+        n += sin(((float)q*line*(i+1))*rad);
+	}
+	n/=(float)layer;
+        int r = (int)map(n,-1,1,min,max);
+
+        if(q%divisor*4==0){
+                r-=variance;
+        }
+        if(q%divisor*2==0){
+                r+=variance;
+        }
+
+        if(q%divisor==0){
+                tracks[tt][q+16]=midi_to_dac(r);
+        }
+
+        if(q%divisor==0){
+		if(vca>0){
+                        tracks[tt+1][q+16]=0xEFFF;
+                        fade_out(tt+1,q,vca);
+
+		}
+        }
+
+
+}
+
+}
+int modulate(int offset, int length, float min, float max,int divisor,float line,int vca, int tt,int variance){
+
+for(int q =0;q<length;q++){
+
+
+        float rad = 3.141592 / 180;
+        float n = sin(((float)q*line)*rad);
+        int r = (int)map(n,-1,1,min,max);
+
+        if(q%divisor*4==0){
+                r-=variance;
+        }
+        if(q%divisor*2==0){
+                r+=variance;
+        }
+
+        if(q%divisor==0){
+                tracks[tt][q+16]=midi_to_dac(r);
+        //}i
+
+        //if(q%divisor==0){
+                //if(vca>0){
+                        //tracks[tt][q+16]=0xEFFF;
+                        fade_out(tt,q,vca);
+
+                //}
+        }
+
+
+}
+
+}
+
 
 int main(int argc, char *argv[])
 {
 
+//midi note gen
+//21-108
+int vca1=0;
+int vca2=0;
+
+int filter1=0;
+int filter2=0;
+
+
+
+//B♭, C, D, E♭, F, G, and A.
+//
+//
+/*
+for(int q =0;q<2000;q++){
+
+	time_t t;
+
+	
+	float rad = 3.141592 / 180;
+   	float n = sin(((float)q*50.0)*rad);
+	int r = (int)map(n,-1,1,20,80);
+
+	if(q%32==0){
+		r-=4;
+	}
+	if(q%16==0){
+		r+=4;
+	}
+	
+	if(q%4==0){
+		tracks[4][q+16]=midi_to_dac(r);
+	}
+
+	if(q%4==0){
+		//vca1=1-vca1;
+		//tracks[5][q+16]=0x0001;
+		//if(vca1){
+			tracks[5][q+16]=0xEFFF;
+			fade_out(5,q,4);
+
+		//}
+	}
+
+
+}
+*/
+
+/*
+//old melody
+melody(0, 3000, 20, 100,4,40.0,4,4,4,24);
+//int melody(int offset, int length, float min, float max,int divisor,float line,int vca, int tt,int variance){
+
+melody(0, 3000, 21 ,80,12,10.0,12,7,1,4);
+
+melody(0, 3000, 21, 80,8,24.0,8,10,1,8);
+
+modulate(0, 3000, 20, 90,4,80.0,4,6,2);
+modulate(0, 3000, 20, 90,8,120.0,8,9,2);
+modulate(0, 3000, 20, 90,16,30.0,16,12,2);
+
+//offset melody
+melody(1024, 256, 50, 80,4,80.0,4,4,4,24);
+//int melody(int offset, int length, float min, float max,int divisor,float line,int vca, int tt,int variance){
+
+melody(1024, 256, 21 ,80,6,20.0,6,7,4,6);
+
+melody(1024, 256, 21, 80,12,60.0,12,10,4,8);
+
+melody(2048, 256, 50, 80,4,120.0,4,4,4,8);
+//int melody(int offset, int length, float min, float max,int divisor,float line,int vca, int tt,int variance){
+
+melody(2048, 256, 21 ,80,6,90.0,6,7,4,8);
+
+melody(2048, 256, 21, 80,12,60.0,12,10,4,16);
+
+
+*/
+
+/*
+for(int q =0;q<2000;q++){
+
+        time_t t;
+
+
+        float rad = 3.141592 / 180;
+        float n = sin(((float)q*200.0)*rad);
+        int r = (int)map(n,-1,1,20,108);
+
+        if(q%4==0){
+              //  tracks[4][q+16]=midi_to_dac(r);
+        }
+
+        if(q%4==0){
+                //vca1=1-vca1;
+                //tracks[5][q+
+		//
+		//16]=0x0001;
+                //if(vca1){
+                        tracks[6][q+16]=midi_to_dac(r);
+                        fade_out(6,q,4);
+
+                //}
+        }
+
+
+}*/
+ /*
+for(int q =0;q<2000;q++){
+
+        time_t t;
+
+
+        float rad = 3.141592 / 180;
+        float n = sin(((float)q*20.0)*rad);
+        int r = (int)map(n,-1,1,10,50);
+
+        if(q%32==0){
+                r-=4;
+        }
+        if(q%16==0){
+                r+=4;
+        }
+
+        if(q%16==0){
+                tracks[7][q+16]=midi_to_dac(r);
+        }
+
+        if(q%16==0){
+                //vca1=1-vca1;
+                //tracks[5][q+16]=0x0001;
+                //if(vca1){
+                        tracks[8][q+16]=0xEFFF;
+                        fade_out(8,q,8);
+
+                //}
+        }
+
+
+}
+
+
+for(int q =0;q<2000;q++){
+
+        time_t t;
+
+
+        float rad = 3.141592 / 180;
+        float n = sin(((float)q*200.0)*rad);
+        int r = (int)map(n,-1,1,20,108);
+
+        if(q%4==0){
+              //  tracks[4][q+16]=midi_to_dac(r);
+        }
+
+        if(q%4==0){
+                //vca1=1-vca1;
+                //tracks[5][q+16]=0x0001;
+                //if(vca1){
+                        tracks[9][q+16]=midi_to_dac(r);
+                        fade_out(9,q,4);
+
+                //}
+        }
+}
+
+
+*/
+/*
+int arr[32]={1,0,0,0,0,0,0,1,0,1,0,1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0};
+	
+	
+	//init some kick values to test
+	//
+	for(int q = 0;q<3000;q++){
+		if((q)%8==0){
+			//snare
+		tracks[2][q+16+4]=0xFFFF;
+		}
+//kick
+int kick = arr[(q%32)];
+		if(kick){
+			tracks[1][q+16]=0xFFFF;
+		}
+		if(q%2==0){
+			tracks[3][q+16]=0xFFFF;
+		}
+		if(q%31==0){
+			tracks[3][q+16]=0xFFFF;
+		}
+	}
+*/
+
+
+
+	
+	
+	//init some kick values to test
+	//
+
+//copy some midi
+//
+//
+//
+
+
+float x=0.01;
+float y=0.0;
+float z=0.0;
+
+float dt=.02;
+float dx=0.0;
+float dy=0.0;
+float dz=0.0;
+
+float t,a=10,b=28,c=8/3.0;
+
+int si=0;
+	//for(int q = 0;q<3000;q++){
+	for(t=0;t<100;t=t+dt){
+
+		dx=a*(y-x)*dt;
+		dy=(x*(b-z)-y)*dt;
+		dz=(x*y-c*z)*dt;
+		x=x+dx;
+		y=y+dy;
+		z=z+dz;
+		printf("xx %f \n",x);
+		printf("yy %f \n",y);
+		printf("zz %f \n",z);
+
+		if((int)z%4==0){
+
+		//	tracks[1][si+16]=0xFFFF;
+		}
+		if((int)y%2==0){
+
+		//	tracks[3][si+16]=0xFFFF;
+		}
+		if((int)x%8==0){
+		//	tracks[2][si+16]=0xFFFF;
+		}
+		si+=1;
+		if(si>3000){
+			si=0;
+		}
+	}
+	//}
+
+
+/*
+for(int m = 0;m<1565;m++){
+
+	if(m%16==0){
+//		tracks[1][m]=0xFFFF;
+	}
+
+//	tracks[4][m+16]=song1[m];
+//	tracks[7][m+16]=song2[m];
+}
+*/
 	struct sched_param sp;
 	sp.sched_priority = 90;
 
