@@ -7,6 +7,8 @@ also needs SDL
 
 uses the analog devices ltc 2668 
 
+I cant remember where the bitmaps came from but I didnt make them
+
 on linux:
 ```
 sudo apt-get install libsdl1.2-dev libsdl1.2debian
